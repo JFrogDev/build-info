@@ -49,6 +49,7 @@ public interface ClientConfigurationFields {
     String PUBLISH_BUILD_INFO = "buildInfo";
     String PUBLISH_FORK_COUNT = "forkCount";
     String RECORD_ALL_DEPENDENCIES = "record.all.dependencies";
+    String RECORD_IMMEDIATE_DEPENDENCIES = "record.immediate.dependencies";
     String SNAPSHOT_REPO_KEY = "snapshot.repoKey";
     String RELEASE_REPO_KEY = "release.repoKey";
     String MATRIX = "matrix";

@@ -389,6 +389,14 @@ public class ArtifactoryClientConfiguration {
             setBooleanValue(RECORD_ALL_DEPENDENCIES, enabled);
         }
 
+        public boolean isRecordImmediateDependencies() {
+            return getBooleanValue(RECORD_IMMEDIATE_DEPENDENCIES, false);
+        }
+
+        public void setRecordImmediateDependencies(Boolean enabled) {
+            setBooleanValue(RECORD_IMMEDIATE_DEPENDENCIES, enabled);
+        }
+
         public String getIncludePatterns() {
             return getStringValue(INCLUDE_PATTERNS);
         }
