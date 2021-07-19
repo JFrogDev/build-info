@@ -1,5 +1,6 @@
 package org.jfrog.gradle.plugin.artifactory.task;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.lang.StringUtils;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Project;
@@ -179,7 +180,7 @@ public class DeployTask extends DefaultTask {
                             IncludeExcludePatterns patterns = new IncludeExcludePatterns(
                                     publisher.getIncludePatterns(),
                                     publisher.getExcludePatterns());
-                            configureProxy(accRoot, artifactoryManager);
+                            configureProxy(contextUrl, accRoot, artifactoryManager);
                             configConnectionTimeout(accRoot, artifactoryManager);
                             configRetriesParams(accRoot, artifactoryManager);
                             deployArtifacts(artifactoryTask.deployDetails, artifactoryManager, patterns, logPrefix, publisher.getMinChecksumDeploySizeKb());
@@ -202,19 +203,88 @@ public class DeployTask extends DefaultTask {
         }
     }
 
-    private void configureProxy(ArtifactoryClientConfiguration clientConf, ArtifactoryManager artifactoryManager) {
+    @VisibleForTesting
+    static void configureProxy(String contextUrl, ArtifactoryClientConfiguration clientConf, ArtifactoryManager artifactoryManager) {
         ArtifactoryClientConfiguration.ProxyHandler proxy = clientConf.proxy;
         String proxyHost = proxy.getHost();
-        if (StringUtils.isNotBlank(proxyHost) && proxy.getPort() != null) {
+        Integer proxyPort = proxy.getPort();
+
+        boolean isHttps = !contextUrl.startsWith("http://");
+
+        // If no proxyHost is explicitly set, check for the JVM system proxyHost property:
+        if (StringUtils.isBlank(proxyHost)) {
+            // Note: "http.nonProxyHosts" is used for both http and https, despite its prefix
+            String systemNonProxyHostsString = System.getProperty("http.nonProxyHosts");
+            String[] systemNonProxyHosts = StringUtils.split(systemNonProxyHostsString, '|');
+
+            String contextUrlHost = getHost(contextUrl);
+            boolean isContextUrlOnNonProxyList = false;
+            for (String nonProxyHost : systemNonProxyHosts) {
+                if (matchesProxyHostWildcardPattern(contextUrlHost, nonProxyHost)) {
+                    isContextUrlOnNonProxyList = true;
+                    break;
+                }
+            }
+
+            if (!isContextUrlOnNonProxyList) {
+                String systemPropertyName = isHttps ? "https.proxyHost" : "http.proxyHost";
+                proxyHost = System.getProperty(systemPropertyName);
+            }
+        }
+
+        // If no proxyPort is explicitly set, check for the JVM system proxyPort property:
+        if (proxyPort == null) {
+            String systemPropertyName = isHttps ? "https.proxyPort" : "http.proxyPort";
+            String systemProxyPort = System.getProperty(systemPropertyName);
+            if (StringUtils.isNotBlank(systemProxyPort)) {
+                proxyPort = Integer.valueOf(systemProxyPort);
+            }
+        }
+
+        if (StringUtils.isNotBlank(proxyHost) && proxyPort != null) {
             log.debug("Found proxy host '{}'", proxyHost);
             String proxyUserName = proxy.getUsername();
             if (StringUtils.isNotBlank(proxyUserName)) {
                 log.debug("Found proxy user name '{}'", proxyUserName);
-                artifactoryManager.setProxyConfiguration(proxyHost, proxy.getPort(), proxyUserName, proxy.getPassword());
+                artifactoryManager.setProxyConfiguration(proxyHost, proxyPort, proxyUserName, proxy.getPassword());
             } else {
                 log.debug("No proxy user name and password found, using anonymous proxy");
-                artifactoryManager.setProxyConfiguration(proxyHost, proxy.getPort());
+                artifactoryManager.setProxyConfiguration(proxyHost, proxyPort);
             }
+        }
+    }
+
+    private static String getHost(String url) {
+        return url.contains("://") ? StringUtils.substringAfter(url, "://") : url;
+    }
+
+    /**
+     * Checks whether a string matches a pattern with * wildcards. * is the only supported wildcard character.
+     *
+     * @param string  The string to check.
+     * @param pattern The wildcard pattern to match with the string.
+     * @return True if the string matches the wildcard pattern, or if the pattern contains no wildcards and is equal to
+     * the string. False otherwise.
+     */
+    private static boolean matchesProxyHostWildcardPattern(@Nonnull String string, @Nonnull String pattern) {
+        String[] patternParts = Arrays.stream(StringUtils.split(pattern, "*"))
+                // Drop leading '.', so that string with "example.com" will match pattern part ".example.com":
+                .map(it -> it.startsWith(".") ? it.substring(1) : it)
+                .toArray(String[]::new);
+
+        if (!pattern.startsWith("*") && !string.startsWith(patternParts[0])) {
+            // Shortcut loop if string doesn't start with an exact match:
+            return false;
+        } else {
+            String remainingString = string;
+            for (String patternPart : patternParts) {
+                if (remainingString.contains(patternPart)) {
+                    remainingString = StringUtils.substringAfter(remainingString, patternPart);
+                } else {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 
